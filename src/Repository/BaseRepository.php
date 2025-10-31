@@ -10,7 +10,7 @@ use Illuminate\Support\Collection;
 
 class BaseRepository implements BaseRepositoryInterface
 {
-    private array $columns;
+    private array $columns = ['*'];
 
     public function __construct(protected Model $model)
     {
@@ -25,6 +25,8 @@ class BaseRepository implements BaseRepositoryInterface
         $query = $this->filters($query, $parameters);
 
         $query = $this->sort($query, $parameters);
+
+        $query = $this->limit($query, $parameters);
 
         return $this->export($query, $parameters, $columns);
     }
@@ -61,6 +63,11 @@ class BaseRepository implements BaseRepositoryInterface
     {
         return $query
             ->orderBy($parameters['sort_by'] ?? $this->model->getKeyName(), $parameters['sort_direction'] ?? 'desc');
+    }
+
+    protected function limit(Builder $query, array $parameters): Builder
+    {
+        return isset($parameters['limit']) ? $query->limit((int) $parameters['limit']) : $query;
     }
 
     protected function export(Builder $query, array $parameters = [], array $columns = ['*']): Builder|Collection|LengthAwarePaginator|array
