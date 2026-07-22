@@ -2,60 +2,94 @@
 
 namespace Celysium\Base\Repository;
 
+use Celysium\Base\Contracts\BaseRepositoryInterface;
+use Exception;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 
+/**
+ * @property Model $model
+ * @property static string $entity
+ */
 class BaseRepository implements BaseRepositoryInterface
 {
-    private array $columns = ['*'];
+    protected static string $entity;
 
-    public function __construct(protected Model $model)
+    /**
+     * @param string $name
+     * @return Model|void
+     * @throws Exception
+     */
+    public function __get(string $name)
     {
+        if ($name == 'model') {
+            return static::instance();
+        }
     }
 
-    public function index(array $parameters = [], array $columns = ['*']): LengthAwarePaginator|Collection
+    /**
+     * @return Model
+     * @throws Exception
+     */
+    public static function instance(): Model
     {
-        $query = $this->model->query();
+        $instance = new static::$entity();
 
-        $query = $this->query($query, $parameters);
+        if (!$instance instanceof Model) {
+            throw new Exception("Class ". static::$entity ." must be an instance of Illuminate\\Database\\Eloquent\\Model");
+        }
 
-        $query = $this->filters($query, $parameters);
-
-        $query = $this->sort($query, $parameters);
-
-        $query = $this->limit($query, $parameters);
-
-        return $this->export($query, $parameters, $columns);
+        return $instance;
     }
 
-    public function conditions(Builder $query): array
+    public function all(array $columns = ['*']): Collection
+    {
+        return $this->model->query()->get($columns);
+    }
+
+    public function index(array $parameters, array $columns = ['*']): Builder|Collection|LengthAwarePaginator|array
+    {
+        $builder = $this->query();
+
+        $builder = $this->filterConditions($builder, $parameters);
+
+        $builder = $this->sort($builder, $parameters);
+
+        return $this->export($builder, $parameters, $columns);
+    }
+
+    public function query(): Builder
+    {
+        return $this->model->query();
+    }
+
+
+    protected function conditions(Builder $query): array
     {
         return [];
     }
 
-    protected function filters(Builder $query, array $parameters = [], array $columns = ['*']): Builder
+    private function filterConditions(Builder $query, array $parameters): Builder
     {
-        $this->columns = $columns;
-        $rules = $this->conditions($query);
-        foreach ($rules as $field => $condition) {
-            if (array_key_exists($field, $parameters)) {
-                if (is_callable($condition)) {
-                    $query = $condition($parameters[$field]);
-                } elseif ($condition == 'like') {
-                    $query->where($field, $condition, "%" . $parameters[$field] . "%");
-                } else {
-                    $query->where($field, $condition, $parameters[$field]);
-                }
+        $conditions = $this->conditions($query);
+        $parameters = array_filter($parameters);
+        if (empty($parameters) || empty($conditions) || empty($commons = array_intersect(array_keys($parameters), array_keys($conditions)))) {
+            return $query;
+        }
+        foreach ($commons as $field) {
+            $condition = $conditions[$field];
+            $value = $parameters[$field];
+            if (is_callable($condition)) {
+                $query = $condition($value);
+            } elseif ($condition == 'like') {
+                $query->where($field, 'like', "%$value%");
+            } else {
+                $query->where($field, $condition, $value);
             }
         }
-        return $query;
-    }
-
-    public function query(Builder $query, array $parameters): Builder
-    {
         return $query;
     }
 
@@ -65,44 +99,38 @@ class BaseRepository implements BaseRepositoryInterface
             ->orderBy($parameters['sort_by'] ?? $this->model->getKeyName(), $parameters['sort_direction'] ?? 'desc');
     }
 
-    protected function limit(Builder $query, array $parameters): Builder
+    protected function export(Builder $query, array $parameters, array $columns = ['*']): Builder|Collection|LengthAwarePaginator|array
     {
-        return isset($parameters['limit']) ? $query->limit((int) $parameters['limit']) : $query;
-    }
-
-    protected function export(Builder $query, array $parameters = [], array $columns = ['*']): Builder|Collection|LengthAwarePaginator|array
-    {
-        if ($columns != $this->columns) {
-            $this->columns = $columns;
-        }
-
-        return match ($parameters['export_type'] ?? null) {
-            'builder'    => $query->select($columns),
+        return match ($parameters['export'] ?? null) {
+            'builder' => $query->select($columns),
             'collection' => $query->get($columns),
-            'array'      => $query->get($columns)->toArray(),
-            default      => $query->paginate($parameters['per_page'] ?? $this->model->getPerPage(), $columns)
+            'array' => $query->get($columns)->toArray(),
+            default => $query->paginate($parameters['per_page'] ?? $this->model->getPerPage(), $columns)
         };
     }
 
-    public function show(Model $model): Model
+    public function find(int|string $id, $columns = ['*']): ?Model
     {
-        return $model;
+        return $this->model->query()->find($id, $columns);
     }
 
-    public function find(int|string $id): ?Model
+    public function findOrFail(int|string $id, $columns = ['*']): ?Model
     {
-        return $this->model->query()->find($id);
+        return $this->model->query()->findOrFail($id, $columns);
     }
-
-    public function findOrFail(int|string $id): ?Model
+    public function findByFields(array $conditions, $columns = ['*']): ?Model
     {
-        return $this->model->query()->findOrFail($id);
+        return $this->model->query()->where($conditions)->first($columns);
+    }
+    public function findOrFailByFields(array $conditions, $columns = ['*']): ?Model
+    {
+        return $this->model->query()->where($conditions)->firstOrFail($columns);
     }
 
     public function store(array $parameters): Model
     {
         return $this->model->query()
-            ->create($parameters);
+                           ->create($parameters);
     }
 
     public function update(Model $model, array $parameters): Model
@@ -112,22 +140,17 @@ class BaseRepository implements BaseRepositoryInterface
         return $model->refresh();
     }
 
-    public function updateById(int|string $id, array $parameters): Model
+    public function updateById(int|string $id, array $parameters): bool
     {
         $result = $this->model->query()
-            ->where($this->model->getKeyName(), $id)
-            ->update($parameters);
+                              ->where($this->model->getKeyName(), $id)
+                              ->update($parameters);
 
         if ($result === 0) {
             throw (new ModelNotFoundException)->setModel(get_class($this->model), [$id]);
         }
 
-        return $this->find($id);
-    }
-
-    public function updateOrCreate(Model $model, array $conditions, array $values): Model
-    {
-        return $model->query()->updateOrCreate($conditions, $values);
+        return $result;
     }
 
     public function destroy(Model $model): bool
@@ -138,7 +161,7 @@ class BaseRepository implements BaseRepositoryInterface
     public function destroyById(int|string $id): bool
     {
         return $this->model->query()
-            ->where('id', $id)
-            ->delete();
+                           ->where('id', $id)
+                           ->delete();
     }
 }

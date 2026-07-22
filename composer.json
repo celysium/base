@@ -5,7 +5,8 @@
         "Laravel",
         "base",
         "sructure",
-        "repository"
+        "repository",
+        "service"
     ],
     "autoload": {
         "psr-4": {
@@ -16,15 +17,11 @@
         {
             "name": "Nasser Hekmati",
             "email": "hekmati.nasser@gmail.com"
-        },
-        {
-            "name": "Ehsan Tavakoli",
-            "email": "ehsantavakoli1995@gmail.com"
         }
     ],
     "require": {
         "php": "^8.0.2",
-        "laravel/framework": "^9.0|^10.0"
+        "laravel/framework": ">=10.0"
     },
     "require-dev": {
         "orchestra/testbench": "^7.0"
