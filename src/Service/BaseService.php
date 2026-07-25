@@ -15,9 +15,9 @@ class BaseService implements BaseServiceInterface
     {
     }
 
-    public function index(array $parameters = []): Builder|Collection|LengthAwarePaginator|array
+    public function index(array $parameters = [], array $columns = ['*']): Builder|Collection|LengthAwarePaginator|array
     {
-        return $this->repository->list($parameters);
+        return $this->repository->index($parameters, $columns);
     }
 
     public function show(Model $model): Model
